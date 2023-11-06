@@ -1,0 +1,221 @@
+---
+title: "Untitled"
+output: word_document
+date: '2023-03-29'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+class.split.pred<-function(Y,w){
+#Predicting the class of a region based off minimizing weighted loss 
+  
+  loss.neg<-sum(w[Y!=-1]) #Weighted loss for predicting class: -1
+  loss.pos<-sum(w[Y!=1]) #Weighted loss for predicting class: 1
+  
+  cond<-which.min(c(loss.neg,loss.pos))==1
+  
+  if(cond){pred<--1}
+  else pred<-1
+  
+  return(pred)
+}
+
+Split<-function(Y,X,w){
+#Finds the optimal feature and split point with observational weights 
+#Minimises weighted error 
+  
+  n<-nrow(X)
+  p<-ncol(X)
+  
+  w.err<-1   #Initialised error as high as it can go
+  
+  for(j in 1:p){
+    x.ind<-order(X[,j])
+    X.sort<-sort(X[,j])
+    Y.sort<-Y[x.ind]    #Sorting Y according to X[,j]
+    w.sort<-w[x.ind]    #Sorting w according to X[,j]
+    for(i in 1:(n-1)){
+      
+      pred.neg<-class.split.pred(Y.sort[1:i],w.sort[1:i])
+      pred.pos<-class.split.pred(Y.sort[(i+1):n],w.sort[(i+1):n])
+      w.neg<-w.sort[1:i]
+      w.pos<-w.sort[(i+1):n]
+      split.err<-sum(w.neg[pred.neg!=Y.sort[1:i]])+sum(w.pos[pred.pos!=Y.sort[(i+1):n]])  #Determing weighted error of split
+      
+      #Determining optimal feature and split point
+      if(split.err<w.err){
+        w.err<-split.err
+        feature<-j
+        point<-X.sort[i]
+        pred.opt<-c(pred.neg,pred.pos)
+        }
+    }
+  }
+  return(list(feature=feature,point=point,pred.opt=pred.opt,w.err=w.err))
+}
+
+Adaboost.M1<-function(Y,X,M){
+#The AdaBoost.M1 algorithm with stumps as base learners 
+  
+  n<-nrow(X)
+  
+  w<-rep(1/n,n)
+  
+  stor.mod<-matrix(0,ncol=5,nrow=M)
+  for(i in 1:M){
+    
+    fit<-Split(Y=Y,X=X,w) #Determining the optimal feature and split point
+   
+    j<-fit$feature #optimal feature 
+    s<-fit$point #optimal split point for feature
+    pred.neg<-fit$pred.opt[1] #Left region prediction 
+    pred.pos<-fit$pred.opt[2] #Right region prediction
+    stor.mod[i,1:4]<-c(j,s,pred.neg,pred.pos)
+  
+    R.neg<-X[,j]<=s
+    R.pos<-X[,j]>s
+    
+    err.tot<-fit$w.err #Error of tree
+    
+    alpha<-log((1-err.tot)/err.tot) #Stump weights
+    stor.mod[i,5]<-alpha
+    
+    fit<-as.numeric()
+    fit[R.neg]<-pred.neg
+    fit[R.pos]<-pred.pos
+    w<-w*exp(alpha*as.numeric(fit!=Y)) #Updating observational weights
+    w<-w/sum(w) #Standardizing weights so that they sum to 1
+    print(i)
+  }
+  return(list(stor.mod=stor.mod))
+}
+
+my.pred<-function(Y,X,stor.mod){
+#Computes the misclassification error and exponential loss as a function of the number of splits, for the AdaBoost.M1 algorithm, with any inputs X and response Y 
+  
+  M<-nrow(stor.mod)
+  n<-nrow(X)
+  
+  my.fit<-matrix(0,ncol=M,nrow=n)
+  for(i in 1:M){
+    my.fit[,i]<-ifelse(X[,stor.mod[i,1]]<=stor.mod[i,2],stor.mod[i,3],stor.mod[i,4]) #Computing the predictions of all stumps
+  }
+  
+  alpha<-stor.mod[,5]
+  err<-as.numeric()
+  err.exp<-as.numeric()
+  for(j in 1:M){
+    pred<-as.numeric()
+    for(i in 1:n){
+      pred[i]<-sum(my.fit[i,1:j]*alpha[1:j]) #Computing AdaBoost.M1 predictions as a function of M (the number of stumps)
+    }
+    pred<-ifelse(pred>0,1,-1)
+    err[j]<-mean(Y!=pred) #misclassifcation error
+    err.exp[j]<-mean(exp(-Y*pred)) #exponential loss
+  }
+  return(list(err=err,err.exp=err.exp))
+}
+
+#Nested Spheres 
+#Generating Training data 
+set.seed(44)
+n<-2000
+p<-10
+X<-matrix(rnorm(n*p),ncol=p,nrow=n)
+Y<-ifelse(apply(X^2,1,sum)>qchisq(0.5,df=10),1,-1)
+
+#Generating Test data
+X.test<-matrix(rnorm(10000*p),ncol=p,nrow=10000)
+Y.test<-ifelse(apply(X.test^2,1,sum)>qchisq(0.5,df=10),1,-1)
+
+#Training Model and determining training and test error
+Ada.mod1<-Adaboost.M1(Y,X,M=10000)
+pred.train<-my.pred(Y,X,Ada.mod1$stor.mod)
+pred.test<-my.pred(Y.test,X.test,Ada.mod1$stor.mod)
+#Training error 
+train.err.Ada.mod1.miss<-pred.train$err
+train.err.Ada.mod1.exp<-pred.train$err.exp
+#Test error
+test.err.Ada.mod1.miss<-pred.test$err
+test.err.Ada.mod1.exp<-pred.test$err.exp
+
+#More overlap between the classes 
+Gen.1<-function(n){
+  #Generating  data inputs for class: 1
+  X<-matrix(0,ncol=p,nrow=n)
+  i<-1
+  while(i<=n){
+    a<-rnorm(p)
+    if(sum(a^2)>12){
+      X[i,]<-a
+      i<-i+1
+    }
+  }
+  return(X)
+}
+
+#Generating training data
+set.seed(7)
+X.train<-matrix(0,ncol=p,nrow=n)
+X.train[1:1000,]<-matrix(rnorm(1000*p),ncol=p,nrow=1000) #First class
+X.train[1001:2000,]<-Gen.1(1000) #Second class
+Y.train<-c(rep(-1,1000),rep(1,1000))
+
+#Generating test data 
+X.test<-matrix(0,ncol=p,nrow=10000)
+X.test[1:5000,]<-matrix(rnorm(5000*p),ncol=p,nrow=5000)
+X.test[5001:10000,]<-Gen.1(5000)
+Y.test<-c(rep(-1,5000),rep(1,5000))
+
+#Training Model and determining training and test error
+Ada.mod2<-Adaboost.M1(Y.train,X.train,M=10000)
+pred.train<-my.pred(Y.train,X.train,Ada.mod2$stor.mod)
+pred.test<-my.pred(Y.test,X.test,Ada.mod2$stor.mod)
+#Training error 
+train.err.Ada.mod2.miss<-pred.train$err
+train.err.Ada.mod2.exp<-pred.train$err.exp
+#Test error
+test.err.Ada.mod2.miss<-pred.test$err
+test.err.Ada.mod2.exp<-pred.test$err.exp
+```
+
+Plotting results misclassification error
+```{r}
+#Nested Spheres
+par(mfrow=c(1,2))
+plot(train.err.Ada.mod1.miss,type="l",ylim=c(0,0.5),xlim=c(0,10000),col="red",xlab="Boosting iterations",ylab="Misclassification error",cex.lab=1.2,main="Nested spheres")
+lines(test.err.Ada.mod1.miss)
+lines(c(-5000,12000),c(min(test.err.Ada.mod1.miss),min(test.err.Ada.mod1.miss)))
+legend("topright",legend=c("Traning error","Test error"),col=c("red","black"),lwd=3)
+
+#Higher Bayes
+plot(train.err.Ada.mod2.miss,type="l",ylim=c(0,0.5),xlim=c(0,10000),col="red",xlab="Boosting iterations",ylab="Misclassification error",cex.lab=1.2,main="Overlap data")
+lines(test.err.Ada.mod2.miss)
+lines(c(-5000,12000),c(min(test.err.Ada.mod2.miss),min(test.err.Ada.mod2.miss)))
+legend("topright",legend=c("Traning error","Test error"),col=c("red","black"),lwd=3)
+```
+
+Plotting results classification error and exponential loss
+```{r}
+#Nested Spheres
+par(mfrow=c(1,2))
+plot(train.err.Ada.mod1.miss,type="l",ylim=c(0,1.5),xlim=c(0,10000),col="red",xlab="Boosting iterations",ylab="Error",cex.lab=1.2,main="Nested spheres")
+lines(test.err.Ada.mod1.miss)
+lines(c(-5000,12000),c(min(test.err.Ada.mod1.miss),min(test.err.Ada.mod1.miss)))
+lines(train.err.Ada.mod1.exp,col="tan2")
+lines(test.err.Ada.mod1.exp,col="dodgerblue3")
+lines(c(-5000,12000),c(min(test.err.Ada.mod1.exp),min(test.err.Ada.mod1.exp)),col="dodgerblue3")
+legend("topright",legend=c("Traning error (misclassification)","Traning error (exponential)","Test error (misclassification)","Test error (exponential)"),col=c("red","tan2","black","dodgerblue3"),lwd=3)
+
+#Higher Bayes
+plot(train.err.Ada.mod2.miss,type="l",ylim=c(0,1.5),xlim=c(0,10000),col="red",xlab="Boosting iterations",ylab="Error",cex.lab=1.2,main="Overlap data")
+lines(test.err.Ada.mod2.miss)
+lines(c(-5000,12000),c(min(test.err.Ada.mod2.miss),min(test.err.Ada.mod2.miss)))
+lines(train.err.Ada.mod2.exp,col="tan2")
+lines(test.err.Ada.mod2.exp,col="dodgerblue3")
+lines(c(-5000,12000),c(min(test.err.Ada.mod2.exp),min(test.err.Ada.mod2.exp)),col="dodgerblue3")
+legend("topright",legend=c("Traning error (misclassification)","Traning error (exponential)","Test error (misclassification)","Test error (exponential)"),col=c("red","tan2","black","dodgerblue3"),lwd=3)
+```
