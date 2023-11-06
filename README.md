@@ -25,4 +25,4 @@ The orginal datasets are:
 
  * Adult : adult1.csv and adult2.csv (These two datasets were combined)
 
- *  Customer Satisfaction : customersat.csv
+ *  Customer Satisfaction : customersat.zip
