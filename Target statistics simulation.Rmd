@@ -1,0 +1,267 @@
+---
+title: "Untitled"
+output: word_document
+date: '2023-07-09'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Greedy approach
+```{r}
+tar.stat.greed<-function(dat,cat,tau){
+#Function to calculate greedy target statistics
+  
+  avg.y<-mean(dat$y)
+  
+  x.cont<-as.numeric()
+  for(i in 1:length(cat)){
+    ind<-dat$x==cat[i]
+    tar.stat<-(sum(dat$y[ind])+(tau*avg.y))/(sum(ind)+tau)
+    x.cont[ind]<-tar.stat
+  }
+  return(x.cont)
+}
+```
+
+Greedy target statistic simulation
+```{r}
+set.seed(583)
+n<-1000
+n.sim<-200
+num.per.class<-seq(1,40,by=1)
+err.numclass<-matrix(0,ncol=length(num.per.class),nrow=n.sim)
+
+for(i in 1:n.sim){
+  for(j in 1:length(num.per.class)){
+    
+    #Generating categorical feature and response
+    num.unique<-round(n/num.per.class[j])
+    cat.unique<-seq(1,num.unique)
+    cat.x<-sort(rep(cat.unique,j))
+    y<-sample(c(0,1),size=length(cat.x),replace=T)
+    dat<-data.frame(x=cat.x,y=y)
+    
+    #Calculating target statistics
+    t.x<-tar.stat.greed(dat=dat,cat=cat.unique,tau=1)
+    
+    #Determining split points
+    split.point<-sort(unique(t.x))
+    
+    #Finding error of optimal split point
+    err<-as.numeric()
+    for(k in 1:(length(split.point)-1)){
+      ind<-t.x>split.point[k]
+      left.pred<-ifelse(sum(y[!ind]==0)>sum(y[!ind]==1),0,1)
+      right.pred<-ifelse(sum(y[ind]==0)>sum(y[ind]==1),0,1)
+      y.pred<-ifelse(ind==T,right.pred,left.pred)
+      err[k]<-sum(y.pred!=y)/nrow(dat)
+    }
+    err.numclass[i,j]<-min(err)
+  }
+}
+```
+
+Graph
+```{r}
+boxplot(err.numclass,ylim=c(0,0.5),xlab="Number of observations for each category",ylab="Training misclassification error",col="steelblue1",xaxt='n')
+axis(side=1,at=c(1,5,10,15,20,25,30,35,40),labels=c(1,5,10,15,20,25,30,35,40))
+lines(c(-100,100),c(0.5,0.5),lty=2)
+```
+
+Leave one out approach
+```{r}
+tar.stat.leave<-function(dat,tau){
+#Function to calculate leave-one-out target statistics
+  
+  x.cont<-as.numeric()
+  avg.y<-mean(dat$y)
+  for(i in 1:nrow(dat)){
+    ind<-dat$x[i]==dat$x
+    tar.stat<-(sum(dat$y[ind])-dat$y[i]+(tau*avg.y))/(sum(ind)-1+tau)
+    x.cont[i]<-tar.stat
+  }
+  return(x.cont)
+}
+```
+
+Leave-one-out target statistic simulation
+```{r}
+set.seed(33)
+n<-1000
+n.sim<-200
+num.class<-seq(1,40,by=1)
+err.numclass<-matrix(0,ncol=length(num.class),nrow=n.sim)
+
+for(i in 1:n.sim){
+  for(j in 1:length(num.class)){
+    
+    #Generating categorical feature and response
+    num.exam.class<-round(n/num.class[j])
+    cat.x<-as.numeric()
+    for(k in 1:num.class[j]){
+      cat.x[(((k-1)*num.exam.class)+1):(k*num.exam.class)]<-rep(num.class[k],num.exam.class)
+    }
+    y<-sample(c(0,1),size=length(cat.x),replace=T)
+    dat<-data.frame(x=cat.x,y=y)
+    
+    #Calculating target statistics 
+    t.x<-tar.stat.leave(dat=dat,tau=1)
+    
+    #Determining split points
+    split.point<-sort(unique(t.x))
+    
+    #Finding error of optimal split point
+    err<-as.numeric()
+    for(k in 1:(length(split.point)-1)){
+      ind<-t.x>split.point[k]
+      left.pred<-ifelse(sum(y[!ind]==0)>sum(y[!ind]==1),0,1)
+      right.pred<-ifelse(sum(y[ind]==0)>sum(y[ind]==1),0,1)
+      y.pred<-ifelse(ind==T,right.pred,left.pred)
+      err[k]<-sum(y.pred!=y)/nrow(dat)
+    }
+    err.numclass[i,j]<-min(err)
+  }
+}
+```
+
+Graphs
+```{r}
+boxplot(err.numclass,ylim=c(0,0.5),xlab="Number of categories",ylab="Training misclassification error",col="steelblue1",xaxt="n")
+axis(side=1,at=c(1,5,10,15,20,25,30,35,40),labels=c(1,5,10,15,20,25,30,35,40))
+lines(c(-100,100),c(0.5,0.5),lty=2)
+```
+
+Ordered Approach
+```{r}
+tar.stat.ord<-function(dat,tau){
+#Function to calculate ordered target statistics
+  
+  n<-nrow(dat)
+  
+  #Generating permutation and sorting data
+  perm<-sample(1:n,size=n,replace=F)
+  dat.perm<-dat[perm,]
+  
+  #Calculating target statistics
+  x.cont<-as.numeric()
+  avg.y<-mean(dat$y) #Assume prior is average response for all observations
+  for(i in 1:n){
+    
+    dat.sub<-dat.perm[1:i,]
+    ind<-dat.sub$x[i]==dat.sub$x
+    
+    if(sum(ind)==1){
+      tar.stat<-(tau*avg.y)/tau
+    } else{
+      a<-dat.sub$y[ind]
+      a<-a[-length(a)]
+      tar.stat<-(sum(a)+(tau*avg.y))/(sum(length(a))+tau)
+    }
+    
+    x.cont[i]<-tar.stat
+  }
+  unique(x.cont)
+  dat.perm$x<-x.cont
+  return(dat.perm)
+}
+```
+
+Ordered approach applied to greedy approach data
+```{r}
+set.seed(6869)
+n<-1000
+n.sim<-200
+num.per.class<-seq(1,40,by=1)
+err.numclass.1<-matrix(0,ncol=length(num.per.class),nrow=n.sim)
+
+for(i in 1:n.sim){
+  for(j in 1:length(num.per.class)){
+    
+    #Generating categorical variable and response
+    num.unique<-round(n/num.per.class[j])
+    cat.unique<-seq(1,num.unique)
+    cat.x<-sort(rep(cat.unique,num.per.class[j]))
+    y<-sample(c(0,1),size=length(cat.x),replace=T)
+    dat<-data.frame(x=cat.x,y=y)
+    
+    #Calculating target statistics
+    dat<-tar.stat.ord(dat=dat,tau=1)
+    
+    #Determining split points
+    split.point<-sort(unique(dat$x))
+    
+    #Finding error of optimal split point
+    if(length(split.point)==1){
+      #No available split points, where each observations has its own category
+      class.err<-sum(dat$y==0)/nrow(dat)
+      err.numclass.1[i,j]<-ifelse(class.err<0.5,class.err,1-class.err)
+    } else{
+      err<-as.numeric()
+      for(k in 1:(length(split.point)-1)){
+        ind<-dat$x>split.point[k]
+        left.pred<-ifelse(sum(dat$y[!ind]==0)>sum(dat$y[!ind]==1),0,1)
+        right.pred<-ifelse(sum(dat$y[ind]==0)>sum(dat$y[ind]==1),0,1)
+        y.pred<-ifelse(ind==T,right.pred,left.pred)
+        err[k]<-sum(y.pred!=dat$y)/nrow(dat)
+      }
+      err.numclass.1[i,j]<-min(err)
+    }
+  }
+}
+```
+
+Ordered approach applied to leave-one-out approach data 
+```{r}
+set.seed(3543)
+n<-1000
+n.sim<-200
+num.class<-seq(1,40,by=1)
+err.numclass.2<-matrix(0,ncol=length(num.class),nrow=n.sim)
+
+for(i in 1:n.sim){
+  for(j in 1:length(num.class)){
+    
+    #Generating categorical feature and response 
+    num.exam.class<-round(n/num.class[j])
+    cat.x<-as.numeric()
+    for(k in 1:num.class[j]){
+      cat.x[(((k-1)*num.exam.class)+1):(k*num.exam.class)]<-rep(num.class[k],num.exam.class)
+    }
+    y<-sample(c(0,1),size=length(cat.x),replace=T)
+    dat<-data.frame(x=cat.x,y=y)
+    
+    #Calculating target statistics
+    dat<-tar.stat.ord(dat=dat,tau=1)
+    
+    #Determining split points
+    split.point<-sort(unique(dat$x))
+    
+    #Finding error of optimal split point
+    err<-as.numeric()
+    for(k in 1:(length(split.point)-1)){
+      ind<-dat$x>split.point[k]
+      left.pred<-ifelse(sum(dat$y[!ind]==0)>sum(dat$y[!ind]==1),0,1)
+      right.pred<-ifelse(sum(dat$y[ind]==0)>sum(dat$y[ind]==1),0,1)
+      y.pred<-ifelse(ind==T,right.pred,left.pred)
+      err[k]<-sum(y.pred!=dat$y)/nrow(dat)
+    }
+    err.numclass.2[i,j]<-min(err)
+  }
+}
+```
+
+Graphs
+```{r}
+par(mfrow=c(1,2))
+boxplot(err.numclass.1,ylim=c(0.3,0.5),xlab="Number of observations for each category",ylab="Training misclassification error",col="steelblue1",xaxt='n')
+axis(side=1,at=c(1,5,10,15,20,25,30,35,40),labels=c(1,5,10,15,20,25,30,35,40))
+lines(c(-100,100),c(0.5,0.5),lty=2)
+
+boxplot(err.numclass.2,ylim=c(0.3,0.5),xlab="Number of categories",ylab="Training misclassification error",col="steelblue1",xaxt='n')
+axis(side=1,at=c(1,5,10,15,20,25,30,35,40),labels=c(1,5,10,15,20,25,30,35,40))
+lines(c(-100,100),c(0.5,0.5),lty=2)
+```
+
+
